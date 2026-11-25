@@ -1,6 +1,10 @@
 # NixOS VM test: deploy an app over the control socket and reach it through
 # the router.
-{ pkgs, module }:
+{
+  pkgs,
+  module,
+  templateApp,
+}:
 let
   echoapp = pkgs.buildGoModule {
     pname = "echoapp";
@@ -54,5 +58,14 @@ pkgs.testers.nixosTest {
     machine.succeed("systemctl restart tinypaas.service")
     machine.wait_until_succeeds("curl -sf http://127.0.0.1:8090/echo/hi")
     machine.succeed("test -f /var/lib/tinypaas/data/echo/app.db")
+
+    # The scaffolded app (Go + SQLite) works end to end under the service sandbox.
+    machine.succeed("su deployer -c 'tinypaas deploy -manifest ${templateApp.manifest} ${templateApp}/bin/app'")
+    machine.succeed("curl -sf -X POST -d body=hello-from-vm http://127.0.0.1:8090/template-app/notes -o /dev/null")
+    page = machine.succeed("curl -sfL http://127.0.0.1:8090/template-app/")
+    assert "hello-from-vm" in page and 'href="static/style.css"' in page, page
+    machine.succeed("curl -sf http://127.0.0.1:8090/template-app/static/style.css")
+    machine.succeed("test -f /var/lib/tinypaas/data/template-app/app.db")
+    machine.fail("su outsider -c 'cat /var/lib/tinypaas/data/template-app/app.db'")
   '';
 }

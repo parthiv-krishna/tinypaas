@@ -1,0 +1,6 @@
+result
+result-*
+/app
+*.db
+*.db-shm
+*.db-wal

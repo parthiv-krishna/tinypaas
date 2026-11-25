@@ -1,0 +1,15 @@
+name: deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: tinypaas
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+      - run: nix build -L .#default
+      - run: tinypaas deploy result/bin/app

@@ -19,11 +19,14 @@ import (
 	"text/tabwriter"
 
 	"tinypaas/internal/paas"
+	"tinypaas/internal/scaffold"
 )
 
 const usage = `tinypaas - run tiny web apps behind one OIDC-protected domain
 
 Usage:
+  tinypaas new [-title T] [-description D] [-dir DIR] NAME
+                                       scaffold a new app (Go + SQLite + Nix + CI)
   tinypaas serve [flags]               run the daemon
   tinypaas deploy [-manifest app.json] BINARY
                                        deploy (or update) an app
@@ -46,6 +49,8 @@ func main() {
 	cmd, args := os.Args[1], os.Args[2:]
 	var err error
 	switch cmd {
+	case "new":
+		err = newApp(args)
 	case "serve":
 		err = serve(args)
 	case "deploy":
@@ -105,6 +110,32 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return srv.Run(ctx)
+}
+
+func newApp(args []string) error {
+	fs := flag.NewFlagSet("new", flag.ExitOnError)
+	title := fs.String("title", "", "display title (default: derived from NAME)")
+	desc := fs.String("description", "", "one-line description for the apps index")
+	dir := fs.String("dir", "", "target directory (default: ./NAME)")
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		return errors.New("usage: tinypaas new [-title T] [-description D] [-dir DIR] NAME")
+	}
+	name := fs.Arg(0)
+	if !paas.ValidName(name) {
+		return fmt.Errorf("invalid app name %q: use a lowercase slug like meal-picker", name)
+	}
+	if *title == "" {
+		*title = scaffold.TitleFromName(name)
+	}
+	if *dir == "" {
+		*dir = name
+	}
+	if err := scaffold.Write(*dir, scaffold.Data{Name: name, Title: *title, Description: *desc}); err != nil {
+		return err
+	}
+	fmt.Printf("created %s in %s (see AGENTS.md)\n", name, *dir)
+	return nil
 }
 
 func readSecret(path string) (string, error) {

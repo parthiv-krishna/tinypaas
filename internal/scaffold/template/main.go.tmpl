@@ -1,0 +1,132 @@
+// [[.Name]] - a tinypaas app.
+//
+// tinypaas contract (see AGENTS.md):
+//   - listen on 127.0.0.1:$PORT
+//   - the working directory is the app's persistent data dir (SQLite lives here)
+//   - the app is served under /[[.Name]]/ with the prefix stripped, so routes
+//     are written as if the app lives at "/", but HTML must use RELATIVE URLs
+//   - the signed-in user arrives in X-Forwarded-User / -Email / -Name / -Groups
+package main
+
+import (
+	"database/sql"
+	"embed"
+	"html/template"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+//go:embed templates/*.html
+var templateFS embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+var tmpl = template.Must(template.ParseFS(templateFS, "templates/*.html"))
+
+type app struct{ db *sql.DB }
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // local development
+	}
+
+	db, err := sql.Open("sqlite", "file:app.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	if err != nil {
+		log.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := migrate(db); err != nil {
+		log.Fatal(err)
+	}
+	a := &app{db: db}
+
+	static, _ := fs.Sub(staticFS, "static")
+	mux := http.NewServeMux()
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
+	mux.HandleFunc("GET /{$}", a.index)
+	mux.HandleFunc("POST /notes", a.addNote)
+	mux.HandleFunc("POST /notes/{id}/delete", a.deleteNote)
+
+	addr := "127.0.0.1:" + port
+	log.Printf("listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+func migrate(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS notes (
+		id         INTEGER PRIMARY KEY,
+		body       TEXT NOT NULL,
+		author     TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`)
+	return err
+}
+
+// user returns the signed-in username (or "dev" when run locally).
+func user(r *http.Request) string {
+	if u := r.Header.Get("X-Forwarded-User"); u != "" {
+		return u
+	}
+	return "dev"
+}
+
+type note struct {
+	ID        int64
+	Body      string
+	Author    string
+	CreatedAt time.Time
+}
+
+func (a *app) index(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.db.Query(`SELECT id, body, author, created_at FROM notes ORDER BY id DESC`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var notes []note
+	for rows.Next() {
+		var n note
+		if err := rows.Scan(&n.ID, &n.Body, &n.Author, &n.CreatedAt); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		notes = append(notes, n)
+	}
+	render(w, "index.html", map[string]any{"User": user(r), "Notes": notes})
+}
+
+func (a *app) addNote(w http.ResponseWriter, r *http.Request) {
+	body := strings.TrimSpace(r.FormValue("body"))
+	if body != "" {
+		if _, err := a.db.Exec(`INSERT INTO notes (body, author) VALUES (?, ?)`, body, user(r)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	// Root-relative redirects are fine: tinypaas rewrites them under the prefix.
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (a *app) deleteNote(w http.ResponseWriter, r *http.Request) {
+	if _, err := a.db.Exec(`DELETE FROM notes WHERE id = ?`, r.PathValue("id")); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func render(w http.ResponseWriter, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
+		log.Printf("render %s: %v", name, err)
+	}
+}

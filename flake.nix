@@ -11,6 +11,12 @@
         "aarch64-linux"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      templateAppFor =
+        pkgs:
+        import ./nix/template-app.nix {
+          inherit pkgs;
+          tinypaas = self.packages.${pkgs.stdenv.hostPlatform.system}.tinypaas;
+        };
     in
     {
       packages = forAllSystems (pkgs: {
@@ -28,9 +34,11 @@
 
       checks = forAllSystems (pkgs: {
         package = self.packages.${pkgs.stdenv.hostPlatform.system}.tinypaas;
+        template-app = templateAppFor pkgs;
         vm = import ./nix/test.nix {
           inherit pkgs;
           module = self.nixosModules.default;
+          templateApp = templateAppFor pkgs;
         };
       });
 

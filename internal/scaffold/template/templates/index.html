@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>[[html .Title]]</title>
+  <!-- Relative URLs only: this page is served at /[[.Name]]/ -->
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <main>
+    <nav><a href="../">&larr; all apps</a><span>{{.User}}</span></nav>
+    <h1>[[html .Title]]</h1>
+    <form method="post" action="notes">
+      <input name="body" placeholder="Write a note…" autofocus required>
+      <button>Add</button>
+    </form>
+    <ul>
+      {{range .Notes}}
+      <li>
+        <p>{{.Body}}</p>
+        <small>{{.Author}} · {{.CreatedAt.Format "Jan 2 15:04"}}</small>
+        <form method="post" action="notes/{{.ID}}/delete"><button class="link">delete</button></form>
+      </li>
+      {{else}}
+      <li class="empty">No notes yet.</li>
+      {{end}}
+    </ul>
+  </main>
+</body>
+</html>

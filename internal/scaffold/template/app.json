@@ -1,0 +1,5 @@
+{
+  "name": [[json .Name]],
+  "title": [[json .Title]],
+  "description": [[json .Description]]
+}
